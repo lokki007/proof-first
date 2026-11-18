@@ -6,21 +6,21 @@ This is how I work with AI after years of daily use, built from what my own logs
 
 ## Why: what a year of my logs showed
 
-I analysed about 12,000 of my own messages to AI agents (Codex, Claude Code, a Telegram agent and an orchestrator app) from November 2025 to November 2026. I expected the analysis to tell me which model to use. Mostly, it didn't.
+I analysed about 11,400 of my own messages to AI agents (Codex, Claude Code, a Telegram agent and an orchestrator app) from November 2025 to November 2026. I expected the analysis to tell me which model to use. It didn't.
 
-**1. The model mattered less than I thought.** Here is how often I rejected an assistant's "done" in my very next message ("still doesn't work", "nope"):
+**1. About 1 in 10 "done" claims was wrong, whichever model made it.** Here is how often I rejected an assistant's "done" in my very next message ("still doesn't work", "nope"):
 
 | Model I was replying to | "Done" claims | I rejected |
 |---|---|---|
 | Claude Opus 5.5 | 71 | 9.9% |
-| GPT-5.6 Sol | 389 | 8.5% |
-| GPT-5.5 | 235 | 8.9% |
-| GPT-6 Astra | 126 | 9.5% |
-| Older generation (GPT-5.1, Codex Max) | 12 | about 17% |
+| GPT-5.6 Sol | 307 | 9.8% |
+| GPT-5.5 | 243 | 9.1% |
+| GPT-6 Astra | 122 | 9.8% |
+| Older generation (GPT-5.1 Codex Max) | 12 | about 17% |
 
-The current models were within about 1.5 points of each other.
+The current models were within one point of each other. The older generation really was worse, but that era is over. Switching between current models won't fix this.
 
-**2. The kind of work mattered more.** On creative and visual work, the GPT models' "done" claims were rejected 12–22% of the time; Opus was at 11.8%, but on only 17 claims. On ordinary software work the rate was 3–9%. A test run can't show that a page looks right, so agents stop at "I edited the CSS" and call it done.
+**2. Visual work was a little worse, and harder to prove.** On creative and visual work, 12.6% of "done" claims were rejected (95 claims across the current models). On software work, 9.4% were (381 claims). The samples are small, so that gap is a hint, not a finding. The cause is easy to see in the logs, though: a test run can't show that a page looks right, so agents stop at "I edited the CSS" and call it done.
 
 **3. My corrections were almost always the same one: you said it's done, and I can't see it working.** Writing the rule into my instructions didn't fix it. Something had to check the claim when it was made.
 
@@ -28,7 +28,7 @@ The current models were within about 1.5 points of each other.
 
 proof-first turns those findings into rules plus one automatic check.
 
-*Method:* a "done" claim is an assistant message that opens with done/fixed/implemented, or says "should now work" or "is now live". A rejection is a short next message saying it still doesn't work. Automated messages were excluded. These are text matches, not hand labels, so treat the numbers as directional.
+*Method:* a "done" claim is an assistant message that opens with done/fixed/implemented, or says "should now work" or "is now live". A rejection is a short next message saying it still doesn't work. Automated messages were excluded: goal continuations, skill and tool injections, image notes and relays. These are text matches, not hand labels, so treat the numbers as directional.
 
 ## What's inside
 
