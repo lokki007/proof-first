@@ -21,7 +21,7 @@ I build and run several small products alone. I usually give one solid brief, th
 
 ## Which model and harness, today
 
-These are my habits, not a ranking. Over a year, current models differed by under two points in how often I rejected their "done". Task type mattered much more.
+These are my habits, not a ranking. Over a year, current models differed by about one point in how often I rejected their "done". Whether I could see the result mattered more than who made it.
 
 | Work | I start with |
 |---|---|
