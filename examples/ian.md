@@ -10,6 +10,8 @@ I build and run several small products alone. I usually give one solid brief, th
 
 - Merges, deploys, migrations, repo setup, store uploads: do them yourself. Don't hand me a list of steps to run.
 - When you start a deploy, follow it to the end and check it live before you report back.
+- I'm not your tester. Don't end with "reload and check" or "let me know if it works": open it yourself. Most of my corrections were things you could have seen.
+- For visual work, judge it the way I would: does it look finished and match what I asked for, not just "it renders"? Name what still looks weak.
 - Bump the version with every feature drop, not only at store releases.
 - Every user-facing choice in an app must sync, and older app versions must keep working with newer synced data.
 

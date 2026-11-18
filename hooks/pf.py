@@ -47,12 +47,26 @@ SEEN_TOOL_RE = re.compile(
     r"(?i)(screenshot|preview_(snapshot|evaluate|act|navigate|open|wait_for)|browser|navigate|"
     r"computer|chrome|playwright|html_render|get_page_text|read_page|cua_repl|imageview|snapshot)"
 )
+# The agent asks the user to do the check it could do itself ("reload and check", "let me know
+# if it works", "tests not run"). Found in 12% of replies the user then called broken, 5% overall.
+HANDOFF_RE = re.compile(
+    r"(?i)\b("
+    r"(?:can|could) you (?:please )?(?:check|test|try|confirm|verify|reload|refresh|look at|open)"
+    r"|please (?:check|test|try|confirm|verify|reload|refresh)"
+    r"|(?:reload|refresh|restart|reopen|re-open)\b[^.\n]{0,60}\b(?:and|to) (?:check|see|confirm|verify|test)"
+    r"|let me know (?:if|whether|how) (?:it|this|that|everything|the \w+) (?:works|worked|looks|is|goes|behaves)"
+    r"|(?:tests?|testing) (?:were |was )?not run"
+    r"|(?:i )?(?:haven'?t|have not|didn'?t|did not) (?:yet )?(?:tried|tested|verified|run|checked|opened|looked)"
+    r"|if (?:it|this|that|the \w+) still (?:fails|doesn'?t|breaks|errors|shows|happens|isn'?t)"
+    r"|confirm (?:that )?you (?:see|can|land|get)"
+    r")")
 IMAGE_RE = re.compile(r"(?i)\.(png|jpe?g|gif|webp|bmp)$")
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 CMD_TOOLS = {"Bash", "PowerShell"}
 
 GATE_REASON = {
-    "missing": "You changed files or ran commands but didn't show it works. End with one line: "
+    "missing": "You changed files or ran commands but didn't show it works. Re-read the user's last "
+               "message and check you did each thing they asked. Then end with one line: "
                "`Proof: seen — what you looked at`, `Proof: tested — what you ran`, or "
                "`Proof: not yet — why not`.",
     "no_evidence": "Your proof line doesn't say what you looked at or ran. Add it after the word, "
@@ -62,7 +76,13 @@ GATE_REASON = {
                      "`tested` or `not yet`.",
     "unbacked_tested": "Your proof line says `tested`, but nothing ran this turn. Run the tests, "
                        "build or program now, or change it to `not yet`.",
+    "handoff": "Your reply asks the user to check something (reload, confirm, try it, let me know) or "
+               "says a check wasn't done. If you can do that check yourself, do it now. If only the "
+               "user can (their device, login or taste), say so in `Proof: not yet — why`.",
 }
+REJECT_TEXT = ("proof-first: the user says it still doesn't work. Before changing code: re-read their "
+               "message, reproduce the problem yourself the way they saw it, then fix it and check it "
+               "the same way.")
 STALL_TEXT = ("proof-first: the user has said it's still broken twice. Don't try the same fix again. "
               "Write a short handoff note (Goal / Done / Failed / Next) and suggest a different "
               "approach or a different model.")
@@ -321,11 +341,12 @@ def cmd_prompt(payload, t0):
     if is_working(prev) and len(prompt) <= 200 and REJECT_RE.search(prompt):
         log("rejected", ctx, rung=proof_of(prev["final_text"])[0])
         rows = [r for r in read_log() if ctx["session"] and r.get("session") == ctx["session"]]
+        text = REJECT_TEXT
         if rows and (sum(r.get("event") == "rejected" for r in rows) >= 2
                 and not any(r.get("event") == "stall" for r in rows)):
             log("stall", ctx)
-            out = {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
-                                          "additionalContext": STALL_TEXT}}
+            text = STALL_TEXT
+        out = {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text}}
     log("prompt", ctx, prev_working=is_working(prev))
     return out
 
@@ -348,6 +369,8 @@ def cmd_stop(payload, t0):
         problem = "unbacked_seen"
     elif rung == "tested" and not ev["tested"]:
         problem = "unbacked_tested"
+    elif rung in ("seen", "tested") and HANDOFF_RE.search(text or ""):
+        problem = "handoff"  # only for seen/tested: "not yet" may hand over honestly
 
     state = home() / "blocked"
     state.mkdir(exist_ok=True)
@@ -386,30 +409,34 @@ def cmd_report(args):
         print(f"No proof-first events in the last {days:g} days (log: {LOG}).")
         return
     stats = defaultdict(lambda: defaultdict(int))
+    handoffs = defaultdict(int)
     ms = defaultdict(list)
     last = {}
     for r in rows:
         k = (r.get("harness") or "?", r.get("model") or "?")
         ev = r.get("event")
         stats[k][ev] += 1
+        if ev in ("gate_warn", "gate_block") and r.get("problem") == "handoff":
+            handoffs[k] += 1
         ms[k].append(r.get("ms") or 0)
         last[k[0]] = max(last.get(k[0], 0), r.get("ts", 0))
     print(f"proof-first: last {days:g} days, mode = {mode()}\n")
     hdr = (f"{'app':12} {'model':24} {'changes':>8} {'you said broken':>16} "
-           f"{'no proof':>9} {'speed':>7}")
+           f"{'no proof':>9} {'left to you':>12} {'speed':>7}")
     print(hdr)
     print("-" * len(hdr))
     pct = lambda a, b: f"{a} ({100 * a / b:.0f}%)" if b else str(a)
     for k in sorted(stats, key=lambda x: -stats[x]["prompt"]):
         s = stats[k]
         changes = s["pass"] + s["gate_warn"] + s["gate_block"]
-        noproof = s["gate_warn"] + s["gate_block"]
+        noproof = s["gate_warn"] + s["gate_block"] - handoffs[k]
         p95 = sorted(ms[k])[int(0.95 * (len(ms[k]) - 1))] if ms[k] else 0
         print(f"{k[0]:12} {k[1][:24]:24} {changes:8} {pct(s['rejected'], changes):>16} "
-              f"{pct(noproof, changes):>9} {p95:5.0f}ms")
+              f"{pct(noproof, changes):>9} {pct(handoffs[k], changes):>12} {p95:5.0f}ms")
     print("\nchanges         = times the agent finished after changing files or running commands")
     print("you said broken = your next message was \"still doesn't work\", \"nope\", ...")
     print("no proof        = finished without a believable Proof line (logged in warn mode, sent back in block mode)")
+    print("left to you     = had proof, but asked you to do a check it could have done itself")
     print("speed           = how long the hook took (95% of runs were faster)")
     print("last seen: " + ", ".join(f"{h} {time.strftime('%Y-%m-%d %H:%M', time.localtime(t))}"
                                     for h, t in sorted(last.items())))

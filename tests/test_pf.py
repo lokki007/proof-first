@@ -176,6 +176,23 @@ class PFTest(unittest.TestCase):
         tp = self.transcript(claude_turn("p1", "x", [tool("Bash", command="pytest")], final))
         self.assertIsNone(self.stop(tp, "p1", final, mode="block"))
 
+    def test_handing_the_check_to_the_user_is_sent_back(self):
+        final = "Fixed the footer link. Reload the page and check it works.\nProof: tested — pytest: 12 passed"
+        tp = self.transcript(claude_turn("p1", "fix footer", [tool("Edit", file_path="a.py"),
+                                                              tool("Bash", command="pytest")], final))
+        self.assertIn("do it now", self.stop(tp, "p1", final, mode="block")["reason"])
+
+    def test_not_yet_may_hand_over_honestly(self):
+        final = "Built the APK. Can you check it on your phone? I have no device here.\nProof: not yet — needs the user's phone"
+        tp = self.transcript(claude_turn("p1", "fix app", [tool("Edit", file_path="a.kt")], final))
+        self.assertIsNone(self.stop(tp, "p1", final, mode="block"))
+
+    def test_agent_doing_its_own_check_is_not_a_handoff(self):
+        final = "I reloaded the page and checked the footer.\nProof: seen — screenshot of /about footer"
+        tp = self.transcript(claude_turn("p1", "fix footer", [tool("Edit", file_path="a.py"),
+                                                              tool("mcp__browser__screenshot")], final))
+        self.assertIsNone(self.stop(tp, "p1", final, mode="block"))
+
     def test_url_in_any_command_is_not_seen(self):
         final = "Done.\nProof: seen — installed it"
         tp = self.transcript(claude_turn("p1", "x", [tool("Bash", command="git clone https://example.test/r")], final))
@@ -238,12 +255,14 @@ class PFTest(unittest.TestCase):
                  + claude_turn("p2", "still doesn't work", [tool("Edit", file_path="a.py")], "Fixed now.")
                  + claude_turn("p3", "nope, same issue", [tool("Edit", file_path="a.py")], "Fixed again."))
         tp = self.transcript(lines)
-        self.assertIsNone(self.prompt(tp, "still doesn't work", "p2"))
+        first = self.prompt(tp, "still doesn't work", "p2")
+        self.assertIn("reproduce the problem yourself", first["hookSpecificOutput"]["additionalContext"])
         out = self.prompt(tp, "nope, same issue", "p3")
         self.assertIn("still broken twice", out["hookSpecificOutput"]["additionalContext"])
         lines += claude_turn("p4", "still broken", [], "")
         tp = self.transcript(lines)
-        self.assertIsNone(self.prompt(tp, "still broken", "p4"))  # stall fires once per session
+        again = self.prompt(tp, "still broken", "p4")  # stall fires once per session
+        self.assertNotIn("still broken twice", again["hookSpecificOutput"]["additionalContext"])
         ev = self.events()
         self.assertEqual(ev.count("stall"), 1)
         self.assertEqual(ev.count("rejected"), 3)
