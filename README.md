@@ -1,70 +1,42 @@
 # proof-first
 
-**A small kit that makes AI coding agents prove their work before calling it done.** It contains a one-page set of rules, one skill and one hook script. It works with Claude Code and Codex CLI, and the rules work with any agent that reads `AGENTS.md` or `CLAUDE.md`.
+**Your AI agent has to show it works before it says "done".**
 
-This is how I work with AI after years of daily use, built from what my own logs showed. Take it, change it, make it yours.
+For a year I logged how I work with AI coding agents. About **1 in 10 times** an agent said "done", my next message was "still doesn't work". It didn't matter which model:
 
-## Why: what a year of my logs showed
-
-I analysed about 11,400 of my own messages to AI agents (Codex, Claude Code, a Telegram agent and an orchestrator app) from November 2025 to November 2026. I expected the analysis to tell me which model to use. It didn't.
-
-**1. About 1 in 10 "done" claims was wrong, whichever model made it.** Here is how often I rejected an assistant's "done" in my very next message ("still doesn't work", "nope"):
-
-| Model I was replying to | "Done" claims | I rejected |
+| Model | Times it said "done" | I said "still broken" |
 |---|---|---|
 | Claude Opus 5.5 | 71 | 9.9% |
 | GPT-5.6 Sol | 307 | 9.8% |
 | GPT-5.5 | 243 | 9.1% |
 | GPT-6 Astra | 122 | 9.8% |
-| Older generation (GPT-5.1 Codex Max) | 12 | about 17% |
 
-The current models were within one point of each other. The older generation really was worse, but that era is over. Switching between current models won't fix this.
+Switching models doesn't fix it. Making the agent check its work before it says "done" might. That's all this is.
 
-**2. Visual work was a little worse, and harder to prove.** On creative and visual work, 12.6% of "done" claims were rejected (95 claims across the current models). On software work, 9.4% were (381 claims). The samples are small, so that gap is a hint, not a finding. The cause is easy to see in the logs, though: a test run can't show that a page looks right, so agents stop at "I edited the CSS" and call it done.
+## How it works
 
-**3. My corrections were almost always the same one: you said it's done, and I can't see it working.** Writing the rule into my instructions didn't fix it. Something had to check the claim when it was made.
+1. **Four rules** your agent reads ([`WORKING.md`](WORKING.md)):
+   - Don't change anything while I'm just asking.
+   - Ask before anything hard to undo; otherwise just do it.
+   - Don't say "done" until you've shown it works.
+   - If I say it's still broken twice, stop and change course.
+2. **A proof line.** Whenever the agent changed something, it ends with one of these:
+   ```
+   Proof: seen — I opened /checkout and the new total shows
+   Proof: tested — the 48 tests pass
+   Proof: not yet — I couldn't open the page, staging is down
+   ```
+3. **A small check** ([`hooks/pf.py`](hooks/pf.py)) that runs after every agent reply. It sends the reply back once in three cases:
+   - the proof line is missing;
+   - it says `seen` but the agent looked at nothing;
+   - it says `tested` but nothing ran.
+4. **Your numbers.** `pf.py report` shows, per model, how often you had to say "still broken".
 
-**4. My short replies carry the stage of the work.** "eli5 first, don't implement" means explain. "Do it all" means finish the job I named. "Still broken" means show me. Agents misread these mostly after a model or harness switch dropped the context.
+There's also a skill, [`prove-it`](skills/prove-it/SKILL.md), that shows agents how to check each kind of work. My own preferences are in [`examples/ian.md`](examples/ian.md); copy it and make it yours.
 
-proof-first turns those findings into rules plus one automatic check.
+## Install
 
-*Method:* a "done" claim is an assistant message that opens with done/fixed/implemented, or says "should now work" or "is now live". A rejection is a short next message saying it still doesn't work. Automated messages were excluded: goal continuations, skill and tool injections, image notes and relays. These are text matches, not hand labels, so treat the numbers as directional.
-
-## What's inside
-
-| File | What it does |
-|---|---|
-| [`WORKING.md`](WORKING.md) | The rules your agent reads: stages, when to stop and ask, the proof ladder, the stall rule, handoff notes. |
-| [`skills/prove-it`](skills/prove-it/SKILL.md) | How to reach "seen" for each kind of task, and how to report it. |
-| [`hooks/pf.py`](hooks/pf.py) | The automatic check, plus a local log and a report. Python 3.9+, standard library only. |
-| [`examples/ian.md`](examples/ian.md) | My personal layer: preferences and which model I use for what. A template for yours. |
-| [`tests/`](tests/test_pf.py) | Tests modelled on real hook payloads and transcripts from both harnesses. |
-
-### What the hook does
-
-- **When a working turn ends** (the agent changed files or ran commands), it looks for a line like this:
-
-  ```
-  Proof: seen — screenshot of /checkout after reload shows the new total
-  ```
-
-  The hook sends the agent back **once** to fix any of these:
-  - The proof line is missing, or names a rung but no evidence.
-  - It claims `checked` and no command ran in that turn.
-  - It claims `seen` and the turn has no `seen` evidence. That means a browser, preview, screenshot or image tool, a live request (`curl`, `wget`, `Invoke-WebRequest`), or a query of real data (`psql`, `sqlite3`, `select … from`).
-
-  It never blocks twice in one turn, and turns that only read or answer questions are never touched. These checks are heuristics: they catch a missing or unbacked claim, not a lazy screenshot.
-- **When you reply "still doesn't work"** right after a working turn, it records a rejection. After two in one session, it tells the agent to apply the stall rule: stop retrying, write a handoff note, and propose another approach or another model.
-- **It logs counts, never text.** Each line of `~/.proof-first/log.jsonl` holds:
-  - the time, harness, session id and model;
-  - a salted hash of the project folder;
-  - the event, the proof rung and the problem found;
-  - how long the hook took.
-
-  No message text, paths or project names are logged.
-- **It never breaks your session.** Any error is written to `~/.proof-first/errors.log`, and the hook exits quietly. It typically takes 5–40 ms, plus Python start-up.
-
-## Install (5 minutes)
+Python 3.9+ is the only requirement. It works with **Claude Code** and **Codex CLI**, and the rules work with any agent that reads `AGENTS.md` or `CLAUDE.md`.
 
 **1. Clone the repo.**
 
@@ -72,91 +44,53 @@ proof-first turns those findings into rules plus one automatic check.
 git clone https://github.com/lokki007/proof-first ~/proof-first
 ```
 
-**2. Make your agent read the rules.** Add one line to your global instruction file. For Claude Code that's `~/.claude/CLAUDE.md`. For Codex it's `~/.codex/AGENTS.md`. Any agent that reads `AGENTS.md` works too.
+**2. Point your agent at the rules.** Add this line to `~/.claude/CLAUDE.md` (Claude Code) or `~/.codex/AGENTS.md` (Codex):
 
 ```
 Follow the rules in ~/proof-first/WORKING.md.
 ```
 
-**3. Install the skill.** Copy `skills/prove-it` into your skills folder: `~/.claude/skills/` for Claude Code, or `~/.agents/skills/` for Codex and other Agent Skills readers.
+**3. Add the skill.** Copy `skills/prove-it` into `~/.claude/skills/` (Claude Code) or `~/.agents/skills/` (Codex).
 
-**4. Add the hooks.** Use absolute paths, and replace `python3` with `python` on Windows.
+**4. Add the hook.** Put this in `~/.claude/settings.json` (Claude Code) or `~/.codex/hooks.json` (Codex), using your own path:
 
-- **Claude Code** goes in `~/.claude/settings.json`; merge it into any existing `"hooks"` block:
-
-  ```json
-  {
-    "hooks": {
-      "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "python3 \"/home/you/proof-first/hooks/pf.py\" prompt", "timeout": 10 }] }],
-      "Stop":             [{ "hooks": [{ "type": "command", "command": "python3 \"/home/you/proof-first/hooks/pf.py\" stop",   "timeout": 10 }] }]
-    }
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "python3 \"/home/you/proof-first/hooks/pf.py\" prompt", "timeout": 10 }] }],
+    "Stop":             [{ "hooks": [{ "type": "command", "command": "python3 \"/home/you/proof-first/hooks/pf.py\" stop",   "timeout": 10 }] }]
   }
-  ```
+}
+```
 
-- **Codex CLI** goes in `~/.codex/hooks.json`; hooks must be enabled with `[features] hooks = true` in `config.toml`:
+- **On Windows,** write `python` instead of `python3`.
+- **For Codex,** don't put quotes around the Python path, and approve the new hooks the first time Codex asks.
 
-  ```json
-  {
-    "hooks": {
-      "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "python3 \"/home/you/proof-first/hooks/pf.py\" prompt", "timeout": 10 }] }],
-      "Stop":             [{ "hooks": [{ "type": "command", "command": "python3 \"/home/you/proof-first/hooks/pf.py\" stop",   "timeout": 10 }] }]
-    }
-  }
-  ```
-
-  Codex has two quirks:
-  - **New hooks don't run until you approve them.** Codex keeps a trust list for hooks, so start Codex once in interactive mode and approve them.
-  - **On Windows, don't put quotes around the interpreter.** Codex runs hook commands through PowerShell, where `"C:\path\python.exe" args` is not a command. Use `python "C:\path\pf.py" stop` instead.
-
-**5. Check it works.** Run one session that edits a file, then:
+**5. Check it works.** After one session that changes a file, run:
 
 ```bash
 python3 ~/proof-first/hooks/pf.py report
 ```
 
-You should see a row for your harness and model.
+## Start gentle
 
-### Rollout: warn first, then block
-
-The hook starts in **warn** mode. It logs every turn that would have been sent back, but never sends anything back. That first week gives you a baseline. Then turn the check on:
+The check starts in **warn** mode: it only logs, and never sends anything back. Run it that way for a week to see your numbers. Then switch it on:
 
 ```bash
 python3 ~/proof-first/hooks/pf.py mode block
 ```
 
-Compare `pf.py report` a few weeks later. The rejection rate (`rej%`) is the number to watch. If more than about 15% of working turns get sent back (`gate%`), the check is too strict for your work, so tell me in an issue.
+## Good to know
 
-## Make it yours
+- **It stays out of your way.** It only looks at replies where the agent changed files or ran commands. It sends a reply back at most once, it never calls the internet or another AI, and it takes a few milliseconds.
+- **It logs counts, never your words.** The log is at `~/.proof-first/log.jsonl`, and project names are hashed.
+- **If the hook breaks, your agent keeps working.** Errors go to `~/.proof-first/errors.log`.
+- **It's a simple check.** It catches a missing or unbacked proof line. It can't tell a careful screenshot from a lazy one, so your "still broken" numbers are the real test.
 
-Copy [`examples/ian.md`](examples/ian.md) to `~/.proof-first/me.md` and rewrite it. `WORKING.md` tells the agent to read it, and your file wins where it is more specific. Keep `WORKING.md` universal and put your own habits in `me.md`.
+To uninstall, remove the two hook entries, the line in `CLAUDE.md`/`AGENTS.md` and the skill folder, then delete `~/.proof-first/`.
 
-## Uninstall
+**How the numbers were counted:** I used about 11,400 of my own messages to Codex, Claude Code and other agents, from Nov 2025 to Nov 2026, with automated messages removed. "Said done" means the agent's reply started with done/fixed/implemented or said "should now work". "Still broken" means my next short message said it didn't work. Older models (GPT-5.1 Codex Max) were worse, at about 17%. Visual work was slightly worse than code (12.6% vs 9.4%), but on small samples.
 
-1. Remove the two hook entries that mention `pf.py`.
-2. Remove the line you added to `CLAUDE.md` / `AGENTS.md`.
-3. Delete `skills/prove-it` from your skills folder.
-4. Delete `~/.proof-first/`.
+Run the tests with `python3 -m unittest discover tests`.
 
-## Glossary
-
-- **Harness:** the program that runs the agent, such as Claude Code or Codex CLI.
-- **Hook:** a script the harness runs on an event, such as "user sent a prompt" or "agent is about to stop".
-- **Working turn:** a turn in which the agent changed files or ran commands.
-- **Proof rung:** `planned < edited < checked < running < seen`. See [`WORKING.md`](WORKING.md).
-- **Rejection:** your short reply right after a working turn, saying it doesn't work.
-- **Stall:** two rejections in one session.
-- **Handoff note:** a five-line state summary, so another model or session can carry on without starting over.
-
-## What it deliberately doesn't do
-
-- **It doesn't switch models automatically.** Switching mid-task loses the context that short replies depend on, and my data showed no gap between models big enough to route on. It tells the agent to suggest a switch when you're stuck, and the handoff note carries the context over.
-- **It doesn't rank models.** `pf.py report` shows your own counts, and you decide.
-- **It doesn't call an LLM, or anything over the network.**
-
-## Tests
-
-```bash
-python3 -m unittest discover tests
-```
-
-MIT licensed.
+MIT licensed. Take it and change it.

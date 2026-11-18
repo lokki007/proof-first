@@ -1,84 +1,42 @@
 # How to work with me
 
-These rules are for the AI agent. They come from a year of my own logs: the most common friction was an agent saying "done" when the result was not done in a way I could see.
+Four rules for AI agents.
 
-## 1. Read the stage of the work
+**1. If I'm asking or exploring, don't change anything.**
+"How does this work?" or "explain first" means: answer, don't edit.
 
-Each message I send is one of four stages. Start in **explore** until I name a job. A short reply keeps the current stage unless it clearly names another one.
+**2. Ask before anything hard to undo. Otherwise, just do it.**
+That means data and migrations, money, deleting things, production settings, and public APIs. For everything else in the job I gave you, go ahead and tell me afterwards. "Do it all" means all of that job, nothing extra.
 
-| Stage | Sounds like | What you do |
-|---|---|---|
-| Explore | "how does X work", "eli5", "don't implement yet" | Read, explain, and don't edit anything. |
-| Decide | "what are the options", "which is better" | Give the options and trade-offs, then wait for my choice. |
-| Build | "do it", "go", "fix it", "do it all" | Do the whole agreed job without asking about routine steps. |
-| Check | "does it work?", "show me", "still broken" | Lead with evidence, not a summary of what you changed. |
+**3. Don't say "done" until you've shown it works.**
+If you changed files or ran commands, end your message with one proof line:
 
-"Do it all" means all of the named job, not the work next to it.
+```
+Proof: seen — I opened /checkout and the new total shows
+Proof: tested — the 48 tests pass and the build works
+Proof: not yet — I changed the CSS but couldn't open the page
+```
 
-## 2. Stop and ask only at the decision line
-
-Explain and wait before anything that is hard to undo or changes what other people depend on:
-- data models and migrations
-- public interfaces
-- money and billing
-- deleting things
-- production settings
-
-Inside the agreed scope, everything else is routine: do it, and tell me afterwards.
-
-## 3. Prove it, then say it
-
-The proof ladder, from weakest to strongest:
-
-| Rung | Meaning |
+| Word | Means |
 |---|---|
-| `planned` | Written down, nothing changed yet. |
-| `edited` | Files changed; nothing has run them. |
-| `checked` | Something ran: tests, a build, the program itself. |
-| `running` | Deployed or started where it will be used. |
-| `seen` | The user-facing result was observed: a screenshot or browser check, a live HTTP request, or a query of the real data. |
+| `seen` | You looked at the real result: a screenshot, the live page, a real request, or the real data. |
+| `tested` | You ran something: tests, a build, or the program itself. |
+| `not yet` | You haven't checked it, and you say why. |
 
-**Every turn in which you changed files or ran commands ends with one line:**
+Anything a person will look at needs `seen`: pages, screens, deploys and data changes. "Not yet" is a fine answer. A wrong "done" is not.
 
-```
-Proof: <rung> — <what you ran or saw>
-```
-
-For example: `Proof: seen — screenshot of /checkout after reload shows the new total`.
-
-Only write "done", "fixed" or "works" when the rung matches the task:
-- UI, visual and user-facing work needs `seen`.
-- A deploy needs `running`, plus one live request.
-- A data change needs `seen`: counts from the real store, or a dry run on staging.
-- Docs and plans need `edited`.
-- Everything else needs at least `checked`.
-
-If you can't reach the needed rung, say so plainly: "edited and checked; not seen because the staging login is down". That is a good answer. A confident "done" that turns out wrong costs me more than an honest "not yet".
-
-The `prove-it` skill shows how to reach `seen` for each kind of task.
-
-## 4. Stall rule
-
-If I reject a result twice in one session ("still doesn't work", "nope"), stop retrying the same approach:
-
-1. Write a handoff note (format below).
-2. Say what you think failed, and why.
-3. Propose either a different approach or a different model or harness for this step.
-
-## 5. Handoff note
-
-Write one whenever work moves to another model, harness or session:
+**4. If I say it's still broken twice, stop and change course.**
+Don't try the same fix a third time. Write a short handoff note:
 
 ```
-Goal: <the outcome I asked for, in my words>
-Decided: <decisions already made, and who made them>
-State: <what exists now> — Proof: <rung> — <evidence>
-Tried and failed: <approach → why it failed>
-Next: <the single next step>
+Goal: what I asked for
+Done: what works now (with proof)
+Failed: what you tried and why it didn't work
+Next: the one next step
 ```
 
-Print it, or save it to `~/.proof-first/handoffs/<project>.md`. Never save it inside the repository.
+Then suggest a different approach, or a different model.
 
-## 6. My personal layer
+---
 
-If `~/.proof-first/me.md` exists, read it after this file. It holds my own preferences, and it wins where it is more specific than this file.
+If `~/.proof-first/me.md` exists, read it too. It holds my personal preferences.

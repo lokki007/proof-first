@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""proof-first hook: asks agents to prove "done", and logs when you reject it.
+"""proof-first: agents must show it works before they say "done".
 
-Usage (wired as harness hooks, reads hook JSON on stdin):
-    pf.py prompt          UserPromptSubmit hook
-    pf.py stop            Stop hook
-    pf.py report [days]   print the table from the log (default 14 days)
-    pf.py mode [warn|block]   show or set the gate mode
+Usage:
+    pf.py prompt              hook: runs when you send a message
+    pf.py stop                hook: runs when the agent finishes
+    pf.py report [days]       your numbers (default: last 14 days)
+    pf.py mode [warn|block]   warn = only log; block = send unproven "done" back once
 
 Works with Claude Code and Codex CLI. Standard library only, Python 3.9+.
 Never breaks your session: every failure exits 0 with no output.
@@ -23,14 +23,15 @@ from pathlib import Path
 HOME = Path(os.environ.get("PROOF_FIRST_HOME") or Path.home() / ".proof-first")
 LOG = HOME / "log.jsonl"
 TAIL_BYTES = 1_000_000
-RUNGS = ["planned", "edited", "checked", "running", "seen"]
-
 # --- patterns ---------------------------------------------------------------
 
-# "Proof: seen — ...", also with markdown: "**Proof:** `seen` — ..."
+# "Proof: seen — ...", also with markdown: "**Proof:** `seen` — ...".
+# Older words still work: planned/edited -> not yet, checked/running -> tested.
 PROOF_RE = re.compile(
-    r"(?im)^[\s>#*_`-]*proof[*_`]*\s*:[\s*_`]*(planned|edited|checked|running|seen)\b[*_`]*[\s\-:—–]*(.*)$"
+    r"(?im)^[\s>#*_`-]*proof[*_`]*\s*:[\s*_`]*"
+    r"(seen|tested|not\s+yet|planned|edited|checked|running)\b[*_`]*[\s\-:—–]*(.*)$"
 )
+PROOF_WORD = {"planned": "not yet", "edited": "not yet", "checked": "tested", "running": "tested"}
 REJECT_RE = re.compile(
     r"(?i)\b(still (doesn'?t|does not|not|isn'?t|broken|the same|showing|failing|fails|wrong)"
     r"|nope|doesn'?t work|does not work|not working|isn'?t working|same (issue|problem|bug|error)"
@@ -51,20 +52,20 @@ EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 CMD_TOOLS = {"Bash", "PowerShell"}
 
 GATE_REASON = {
-    "missing": "This turn changed files or ran commands but has no proof line. End with "
-               "`Proof: <planned|edited|checked|running|seen> — <what you ran or saw>`. "
-               "If the user can't see it working yet, say so instead of calling it done.",
-    "unbacked_seen": "Your proof line says `seen`, but this turn has no screenshot, browser check, "
-                     "live request or data query. Look at the real result now, or lower the rung.",
-    "no_evidence": "Your proof line names a rung but not the evidence. Add what you ran or saw "
-                   "after the rung, e.g. `Proof: checked — pytest: 48 passed`.",
-    "unbacked_checked": "Your proof line says `checked`, but no command ran this turn. Run the "
-                        "test, build or program now, or lower the rung to `edited`.",
+    "missing": "You changed files or ran commands but didn't show it works. End with one line: "
+               "`Proof: seen — what you looked at`, `Proof: tested — what you ran`, or "
+               "`Proof: not yet — why not`.",
+    "no_evidence": "Your proof line doesn't say what you looked at or ran. Add it after the word, "
+                   "e.g. `Proof: tested — pytest: 48 passed`.",
+    "unbacked_seen": "Your proof line says `seen`, but you didn't look at anything this turn (no "
+                     "screenshot, browser, live request or data query). Look now, or change it to "
+                     "`tested` or `not yet`.",
+    "unbacked_tested": "Your proof line says `tested`, but nothing ran this turn. Run the tests, "
+                       "build or program now, or change it to `not yet`.",
 }
-STALL_TEXT = ("proof-first: the user has rejected a result twice in this session. Apply the stall "
-              "rule in WORKING.md: stop retrying the same approach, write a handoff note (goal, "
-              "decisions, current state with proof rung, what failed, next step) and propose a "
-              "different approach or a different model.")
+STALL_TEXT = ("proof-first: the user has said it's still broken twice. Don't try the same fix again. "
+              "Write a short handoff note (Goal / Done / Failed / Next) and suggest a different "
+              "approach or a different model.")
 
 
 # --- small helpers ----------------------------------------------------------
@@ -255,19 +256,20 @@ def evidence(turn):
     cmds = " \n".join(turn["commands"])
     seen = (bool(turn["images"]) or any(SEEN_TOOL_RE.search(t) for t in turn["tools"])
             or bool(SEEN_CMD_RE.search(cmds)))
-    checked = seen or bool(turn["commands"])
-    return {"seen": seen, "checked": checked}
+    tested = seen or bool(turn["commands"])
+    return {"seen": seen, "tested": tested}
 
 
 def proof_of(text):
-    """Return (rung, has_evidence_text) for the last proof line, or (None, False)."""
+    """Return (word, says_what) for the last proof line: word is seen/tested/not yet or None."""
     lines = (text or "").strip().splitlines()[-15:]
     m = None
     for m in PROOF_RE.finditer("\n".join(lines)):
         pass
     if not m:
         return None, False
-    return m.group(1).lower(), bool(m.group(2).strip(" *_`"))
+    word = re.sub(r"\s+", " ", m.group(1).lower())
+    return PROOF_WORD.get(word, word), bool(m.group(2).strip(" *_`"))
 
 
 # --- hook context -----------------------------------------------------------
@@ -344,8 +346,8 @@ def cmd_stop(payload, t0):
         problem = "no_evidence"
     elif rung == "seen" and not ev["seen"]:
         problem = "unbacked_seen"
-    elif rung == "checked" and not ev["checked"]:
-        problem = "unbacked_checked"
+    elif rung == "tested" and not ev["tested"]:
+        problem = "unbacked_tested"
 
     state = home() / "blocked"
     state.mkdir(exist_ok=True)
@@ -392,22 +394,25 @@ def cmd_report(args):
         stats[k][ev] += 1
         ms[k].append(r.get("ms") or 0)
         last[k[0]] = max(last.get(k[0], 0), r.get("ts", 0))
-    print(f"proof-first, last {days:g} days, mode={mode()}\n")
-    hdr = f"{'harness':12} {'model':24} {'prompts':>7} {'working':>7} {'rejected':>8} {'rej%':>5} {'gated':>5} {'gate%':>5} {'p95ms':>6}"
+    print(f"proof-first: last {days:g} days, mode = {mode()}\n")
+    hdr = (f"{'app':12} {'model':24} {'changes':>8} {'you said broken':>16} "
+           f"{'no proof':>9} {'speed':>7}")
     print(hdr)
     print("-" * len(hdr))
+    pct = lambda a, b: f"{a} ({100 * a / b:.0f}%)" if b else str(a)
     for k in sorted(stats, key=lambda x: -stats[x]["prompt"]):
         s = stats[k]
-        working = s["pass"] + s["gate_warn"] + s["gate_block"]
-        gated = s["gate_warn"] + s["gate_block"]
+        changes = s["pass"] + s["gate_warn"] + s["gate_block"]
+        noproof = s["gate_warn"] + s["gate_block"]
         p95 = sorted(ms[k])[int(0.95 * (len(ms[k]) - 1))] if ms[k] else 0
-        pct = lambda a, b: f"{100 * a / b:4.0f}%" if b else "   - "
-        print(f"{k[0]:12} {k[1][:24]:24} {s['prompt']:7} {working:7} {s['rejected']:8} "
-              f"{pct(s['rejected'], working)} {gated:5} {pct(gated, working)} {p95:6.0f}")
-    print("\nworking = turns that edited files or ran commands; rej% = rejected / working;"
-          " gate% = turns that failed the proof check (warned or sent back).")
-    print("last event: " + ", ".join(f"{h} {time.strftime('%Y-%m-%d %H:%M', time.localtime(t))}"
-                                     for h, t in sorted(last.items())))
+        print(f"{k[0]:12} {k[1][:24]:24} {changes:8} {pct(s['rejected'], changes):>16} "
+              f"{pct(noproof, changes):>9} {p95:5.0f}ms")
+    print("\nchanges         = times the agent finished after changing files or running commands")
+    print("you said broken = your next message was \"still doesn't work\", \"nope\", ...")
+    print("no proof        = finished without a believable Proof line (logged in warn mode, sent back in block mode)")
+    print("speed           = how long the hook took (95% of runs were faster)")
+    print("last seen: " + ", ".join(f"{h} {time.strftime('%Y-%m-%d %H:%M', time.localtime(t))}"
+                                    for h, t in sorted(last.items())))
     err = HOME / "errors.log"
     if err.exists() and err.stat().st_size:
         print(f"note: hook errors were recorded in {err}")

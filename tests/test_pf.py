@@ -113,7 +113,7 @@ class PFTest(unittest.TestCase):
         tp = self.transcript(claude_turn("p1", "make it", [tool("Edit", file_path="a.py")], "Done."))
         out = self.stop(tp, "p1", "Done.", mode="block")
         self.assertEqual(out["decision"], "block")
-        self.assertIn("Proof:", out["reason"])
+        self.assertIn("Proof: seen", out["reason"])
         self.assertEqual(self.events(), ["gate_block"])
 
     def test_warn_mode_is_default_and_never_blocks(self):
@@ -122,7 +122,7 @@ class PFTest(unittest.TestCase):
         self.assertEqual(self.events(), ["gate_warn"])
 
     def test_proof_with_evidence_passes(self):
-        final = "Fixed.\nProof: checked — pytest passed (12 tests)"
+        final = "Fixed.\nProof: tested — pytest passed (12 tests)"
         tp = self.transcript(claude_turn("p1", "fix", [tool("Edit", file_path="a.py"),
                                                        tool("Bash", command="pytest -q")], final))
         self.assertIsNone(self.stop(tp, "p1", final, mode="block"))
@@ -148,17 +148,33 @@ class PFTest(unittest.TestCase):
         self.assertIsNone(self.stop(tp, "p1", final, mode="block"))
 
     def test_proof_line_without_evidence_text_is_sent_back(self):
-        final = "Done.\nProof: checked"
+        final = "Done.\nProof: tested"
         tp = self.transcript(claude_turn("p1", "x", [tool("Bash", command="make")], final))
         out = self.stop(tp, "p1", final, mode="block")
-        self.assertIn("not the evidence", out["reason"])
+        self.assertIn("doesn't say what", out["reason"])
 
     def test_markdown_proof_line_is_accepted(self):
-        for final in ["Done.\n**Proof:** checked — pytest passed",
-                      "Done.\nProof: `checked` — pytest passed",
-                      "Done.\n- **Proof: checked** — pytest passed"]:
+        for final in ["Done.\n**Proof:** tested — pytest passed",
+                      "Done.\nProof: `tested` — pytest passed",
+                      "Done.\n- **Proof: tested** — pytest passed"]:
             tp = self.transcript(claude_turn("p1", "x", [tool("Bash", command="pytest")], final))
             self.assertIsNone(self.stop(tp, "p1", final, mode="block"), final)
+
+    def test_not_yet_is_an_honest_answer(self):
+        final = "Changed the CSS.\nProof: not yet — couldn't open the page, staging is down"
+        tp = self.transcript(claude_turn("p1", "x", [tool("Edit", file_path="a.css")], final))
+        self.assertIsNone(self.stop(tp, "p1", final, mode="block"))
+        self.assertEqual(self.events(), ["pass"])
+
+    def test_tested_with_nothing_run_is_sent_back(self):
+        final = "Done.\nProof: tested — it works"
+        tp = self.transcript(claude_turn("p1", "x", [tool("Edit", file_path="a.py")], final))
+        self.assertIn("nothing ran", self.stop(tp, "p1", final, mode="block")["reason"])
+
+    def test_old_proof_words_still_work(self):
+        final = "Done.\nProof: checked — pytest passed"
+        tp = self.transcript(claude_turn("p1", "x", [tool("Bash", command="pytest")], final))
+        self.assertIsNone(self.stop(tp, "p1", final, mode="block"))
 
     def test_url_in_any_command_is_not_seen(self):
         final = "Done.\nProof: seen — installed it"
@@ -224,7 +240,7 @@ class PFTest(unittest.TestCase):
         tp = self.transcript(lines)
         self.assertIsNone(self.prompt(tp, "still doesn't work", "p2"))
         out = self.prompt(tp, "nope, same issue", "p3")
-        self.assertIn("stall rule", out["hookSpecificOutput"]["additionalContext"])
+        self.assertIn("still broken twice", out["hookSpecificOutput"]["additionalContext"])
         lines += claude_turn("p4", "still broken", [], "")
         tp = self.transcript(lines)
         self.assertIsNone(self.prompt(tp, "still broken", "p4"))  # stall fires once per session
