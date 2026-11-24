@@ -60,6 +60,16 @@ HANDOFF_RE = re.compile(
     r"|if (?:it|this|that|the \w+) still (?:fails|doesn'?t|breaks|errors|shows|happens|isn'?t)"
     r"|confirm (?:that )?you (?:see|can|land|get)"
     r")")
+# The agent stopped to wait on work it started (CI, a release, a background command) and says
+# so: an honest "not yet" even without the Proof line. Needs both the words and a wait tool.
+PAUSE_RE = re.compile(
+    r"(?i)\b(waiting (?:on|for)|still waiting|under way|not live yet"
+    r"|(?:is|are|still) (?:running|building|deploying|in progress|pending)"
+    r"|(?:once|when) (?:it|they|both|its|the \w+)[^.\n]{0,40}\b(?:finish|complete|pass|land)(?:e?s)?\b"
+    r"|i'?ll (?:verify|check|report|go on|pick up|finish)[^.\n]{0,60}\b(?:when|once))"
+)
+WAIT_TOOL_RE = re.compile(
+    r"(?i)(background_wait|watch_pull_request|\bMonitor\b|ScheduleWakeup|delegate_task|thread_wait)")
 IMAGE_RE = re.compile(r"(?i)\.(png|jpe?g|gif|webp|bmp)$")
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 CMD_TOOLS = {"Bash", "PowerShell"}
@@ -168,7 +178,7 @@ def jsonl(path, max_bytes=TAIL_BYTES):
 
 def new_turn(key, user_text=""):
     return {"key": key, "user_text": user_text, "edits": 0, "commands": [], "tools": [],
-            "images": 0, "final_text": "", "model": None}
+            "images": 0, "final_text": "", "model": None, "background": False}
 
 
 def claude_user_text(msg):
@@ -213,6 +223,8 @@ def claude_turns(path):
                 elif b.get("type") == "tool_use":
                     name, inp = b.get("name", ""), b.get("input") or {}
                     turn["tools"].append(name)
+                    if inp.get("run_in_background"):
+                        turn["background"] = True
                     if name in EDIT_TOOLS:
                         turn["edits"] += 1
                     elif name in CMD_TOOLS:
@@ -270,6 +282,26 @@ def codex_turns(path):
 
 def is_working(turn):
     return bool(turn and (turn["edits"] or turn["commands"]))
+
+
+def paused(turn, text):
+    """Stopped to wait on running work and said so."""
+    waits = turn.get("background") or any(WAIT_TOOL_RE.search(t) for t in turn["tools"])
+    return bool(waits and PAUSE_RE.search(text or ""))
+
+
+def quiet(turn, text):
+    """A routine check that changed no files and ended with a configured "nothing to do" reply.
+    config.json: {"quiet": ["^Inbox: nothing new\\.$"]} (regexes on the final message)."""
+    if turn["edits"]:
+        return False
+    for pat in config().get("quiet") or []:
+        try:
+            if re.search(pat, (text or "").strip()):
+                return True
+        except re.error:
+            continue
+    return False
 
 
 def evidence(turn):
@@ -359,6 +391,10 @@ def cmd_stop(payload, t0):
         return None
     text = payload.get("last_assistant_message") or turn["final_text"]
     rung, has_text = proof_of(text)
+    if rung is None and quiet(turn, text):
+        return None
+    if rung is None and paused(turn, text):
+        rung, has_text = "not yet", True
     ev = evidence(turn)
     problem = None
     if rung is None:

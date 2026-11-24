@@ -97,6 +97,8 @@ python3 ~/proof-first/hooks/pf.py mode block
 ## Good to know
 
 - **It stays out of your way.** It only looks at replies where the agent changed files or ran commands. It sends a reply back at most once, it never calls the internet or another AI, and it takes a few milliseconds.
+- **Waiting isn't missing proof.** If the agent stops to wait on something it started (CI, a release, a background command) and says it's waiting, that counts as "not yet".
+- **Quiet routine checks.** A scheduled check that changed no files and ended with "nothing to do" can be skipped. Add its reply to `~/.proof-first/config.json`, for example `{"mode": "block", "quiet": ["^Inbox: nothing new\\.$"]}`.
 - **It logs counts, never your words.** The log is at `~/.proof-first/log.jsonl`, and project names are hashed.
 - **If the hook breaks, your agent keeps working.** Errors go to `~/.proof-first/errors.log`.
 - **It's a simple check.** It catches a missing or unbacked proof line. It can't tell a careful screenshot from a lazy one, so your "still broken" numbers are the real test.

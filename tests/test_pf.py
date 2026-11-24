@@ -166,6 +166,40 @@ class PFTest(unittest.TestCase):
         self.assertIsNone(self.stop(tp, "p1", final, mode="block"))
         self.assertEqual(self.events(), ["pass"])
 
+    def test_waiting_on_running_work_counts_as_not_yet(self):
+        final = "Pushed the fix. Waiting on CI for #481."
+        tp = self.transcript(claude_turn("p1", "x", [tool("Bash", command="git push"),
+                                                     tool("mcp__t3-code__watch_pull_request", pr=481)], final))
+        self.assertIsNone(self.stop(tp, "p1", final, mode="block"))
+        self.assertEqual(self.events(), ["pass"])
+
+    def test_background_command_pause_counts_as_not_yet(self):
+        final = "The release is running; I'll verify it live when it finishes."
+        tp = self.transcript(claude_turn("p1", "x", [tool("Bash", command="./release.sh",
+                                                          run_in_background=True)], final))
+        self.assertIsNone(self.stop(tp, "p1", final, mode="block"))
+
+    def test_waiting_words_without_a_wait_tool_are_sent_back(self):
+        final = "Waiting on CI for #481."
+        tp = self.transcript(claude_turn("p1", "x", [tool("Bash", command="git push")], final))
+        self.assertIsNotNone(self.stop(tp, "p1", final, mode="block"))
+
+    def test_done_after_a_wait_is_still_sent_back(self):
+        final = "#464 is clear to merge: both CI checks passed."
+        tp = self.transcript(claude_turn("p1", "x", [tool("mcp__t3-code__t3_background_wait", id="b1"),
+                                                     tool("Bash", command="gh pr checks 464")], final))
+        self.assertIsNotNone(self.stop(tp, "p1", final, mode="block"))
+
+    def test_configured_quiet_reply_is_ignored(self):
+        self.home.mkdir(parents=True, exist_ok=True)
+        (self.home / "config.json").write_text(json.dumps({"quiet": [r"^Inbox: nothing new\.$", "("]}))
+        tp = self.transcript(claude_turn("p1", "x", [tool("PowerShell", command="inbox pending")],
+                                         "Inbox: nothing new."))
+        self.assertIsNone(self.stop(tp, "p1", "Inbox: nothing new.", mode="block"))
+        self.assertEqual(self.events(), [])
+        tp = self.transcript(claude_turn("p2", "x", [tool("Edit", file_path="a.py")], "Inbox: nothing new."))
+        self.assertIsNotNone(self.stop(tp, "p2", "Inbox: nothing new.", mode="block"))  # edits never quiet
+
     def test_tested_with_nothing_run_is_sent_back(self):
         final = "Done.\nProof: tested — it works"
         tp = self.transcript(claude_turn("p1", "x", [tool("Edit", file_path="a.py")], final))
